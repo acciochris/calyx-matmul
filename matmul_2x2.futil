@@ -1,0 +1,152 @@
+import "primitives/core.futil";
+import "primitives/binary_operators.futil";
+import "primitives/memories/comb.futil";
+
+component main () -> () {
+  cells {
+    // input: two 2x2 matrices at index 0 and 1
+    // output: one 2x2 matrix at index 2
+    @external mem = comb_mem_d3(32, 3, 2, 2, 2, 2, 2);
+
+    // matrix indices
+    i = std_reg(2);
+    j = std_reg(2);
+    k = std_reg(2);
+    addi = std_add(2);
+    iloop = std_lt(2);
+    jloop = std_lt(2);
+    kloop = std_lt(2);
+
+    // temporary registers
+    reg0 = std_reg(32);
+    reg1 = std_reg(32);
+    reg2 = std_reg(32);
+
+    // arithmetic
+    mult_pipe = std_mult_pipe(32);
+    add = std_add(32);
+  }
+  wires {
+    group read_mat_0 {
+      mem.addr0 = 2'd0;
+      mem.addr1 = i.out;
+      mem.addr2 = k.out;
+      reg0.in = mem.read_data;
+      reg0.write_en = 1'b1;
+      read_mat_0[done] = reg0.done;
+    }
+
+    group read_mat_1 {
+      mem.addr0 = 2'd1;
+      mem.addr1 = k.out;
+      mem.addr2 = j.out;
+      reg1.in = mem.read_data;
+      reg1.write_en = 1'b1;
+      read_mat_1[done] = reg1.done;
+    }
+
+    group mult_and_add {
+      mult_pipe.left = reg0.out;
+      mult_pipe.right = reg1.out;
+      add.left = mult_pipe.out;
+      add.right = reg2.out;
+      reg2.in = add.out;
+      reg2.write_en = mult_pipe.done;
+      mult_pipe.go = !mult_pipe.done ? 1'b1;
+      mult_and_add[done] = reg2.done;
+    }
+
+    group write_result {
+      mem.addr0 = 2'd2;
+      mem.addr1 = i.out;
+      mem.addr2 = j.out;
+      mem.write_data = reg2.out;
+      mem.write_en = 1'b1;
+      write_result[done] = mem.done;
+    }
+
+    group inc_i {
+      addi.left = i.out;
+      addi.right = 2'b1;
+      i.in = addi.out;
+      i.write_en = 1'b1;
+      inc_i[done] = i.done;
+    }
+
+    group inc_j {
+      addi.left = j.out;
+      addi.right = 2'd1;
+      j.in = addi.out;
+      j.write_en = 1'b1;
+      inc_j[done] = j.done;
+    }
+
+    group inc_k {
+      addi.left = k.out;
+      addi.right = 2'd1;
+      k.in = addi.out;
+      k.write_en = 1'b1;
+      inc_k[done] = k.done;
+    }
+
+    group reset_i {
+      i.in = 2'd0;
+      i.write_en = 1'b1;
+      reset_i[done] = i.done;
+    }
+
+    group reset_j {
+      j.in = 2'd0;
+      j.write_en = 1'b1;
+      reset_j[done] = j.done;
+    }
+
+    group reset_k {
+      k.in = 2'd0;
+      k.write_en = 1'b1;
+      reset_k[done] = k.done;
+    }
+
+    group reset_reg2 {
+      reg2.in = 32'd0;
+      reg2.write_en = 1'b1;
+      reset_reg2[done] = reg2.done;
+    }
+
+    comb group ilt {
+      iloop.left = i.out;
+      iloop.right = 2'd2;
+    }
+
+    comb group jlt {
+      jloop.left = j.out;
+      jloop.right = 2'd2;
+    }
+
+    comb group klt {
+      kloop.left = k.out;
+      kloop.right = 2'd2;
+    }
+  }
+  control {
+    seq {
+      reset_i;
+      while iloop.out with ilt {
+        reset_j;
+        while jloop.out with jlt {
+          reset_k;
+          reset_reg2;
+          while kloop.out with klt {
+            read_mat_0;
+            read_mat_1;
+            mult_and_add;
+            inc_k;
+          }
+          write_result;
+          inc_j;
+        }
+        inc_i;
+      }
+    }
+  }
+}
