@@ -124,7 +124,7 @@ def matmul_systolic_nxn(prog: cb.Builder, n: int = 2, bitwidth: int = 32):
     subib = [comp.sub(idx_size, f"subib{i}") for i in range(n)]
 
     # pes
-    pe = [[comp.cell(f"pe{i}{j}", pe_comp) for j in range(n)] for i in range(n)]
+    pe = [[comp.cell(f"pe_{i}_{j}", pe_comp) for j in range(n)] for i in range(n)]
 
     # routing within pes, and between pes and input
     with comp.continuous:
@@ -187,7 +187,7 @@ def matmul_systolic_nxn(prog: cb.Builder, n: int = 2, bitwidth: int = 32):
     for i in range(n):
         row = []
         for j in range(n):
-            with comp.group(f"store_pe{i}{j}") as g:
+            with comp.group(f"store_pe_{i}_{j}") as g:
                 mem.addr0 = cb.const(2, 2)
                 mem.addr1 = cb.const(idx_size, i)
                 mem.addr2 = cb.const(idx_size, j)
