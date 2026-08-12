@@ -10,7 +10,7 @@ from test_gen import random_test_case
 
 def run_test_case(case, file):
     mem_in = json.loads(case)["mem"]["data"]
-    with tempfile.NamedTemporaryFile("w", delete_on_close=False) as simdata:
+    with tempfile.NamedTemporaryFile("w", suffix=".data", delete_on_close=False) as simdata:
         simdata.write(case)
         simdata.close()
 
