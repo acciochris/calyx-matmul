@@ -36,7 +36,15 @@ def comb_mem_d3(
     )
 
 
-def define_pe(comp: cb.ComponentBuilder, bitwidth: int = 32):
+def sguard(start: int, stop: int | None = None) -> cb.ExprBuilder:
+    """Create a static cycle guard"""
+
+    guard = ast.GuardExpr()
+    guard.doc = lambda: f"%[{start}:{stop}]" if stop else f"%{start}"
+    return cb.ExprBuilder(guard)
+
+
+def define_pe(comp: cb.ComponentBuilder, bitwidth: int = 32, static: bool = False):
     comp.input("ain", bitwidth)
     comp.input("bin", bitwidth)
     comp.input("clear", 1)
@@ -56,43 +64,74 @@ def define_pe(comp: cb.ComponentBuilder, bitwidth: int = 32):
         this.aout = a.out
         this.bout = b.out
 
-    with comp.group("store_a") as store_a:
+    if static:
+        group_1 = lambda x: comp.static_group(x, latency=1)
+    else:
+        group_1 = comp.group
+
+    comp.group = group_1  # type: ignore
+
+    with group_1("store_a") as store_a:
         a.in_ = ~this.clear @ this.ain
         a.in_ = this.clear @ 0
         a.write_en = 1
-        store_a.done = a.done
+        if not static:
+            store_a.done = a.done
 
-    with comp.group("store_b") as store_b:
+    with group_1("store_b") as store_b:
         b.in_ = ~this.clear @ this.bin
         b.in_ = this.clear @ 0
         b.write_en = 1
-        store_b.done = b.done
+        if not static:
+            store_b.done = b.done
 
-    with comp.group("mult_and_add") as mult_and_add:
-        mult_pipe.left = a.out
-        mult_pipe.right = b.out
-        mult_pipe.go = 1
-        add.left = result.out
-        add.right = mult_pipe.out
-        result.in_ = (~this.clear & mult_pipe.done) @ add.out
-        result.in_ = this.clear @ 0
-        result.write_en = mult_pipe.done
-        mult_and_add.done = result.done
+    if static:
+        with comp.static_group("mult_and_add", latency=4) as mult_and_add:
+            mult_pipe.left = sguard(0, 3) @ a.out
+            mult_pipe.right = sguard(0, 3) @ b.out
+            mult_pipe.go = sguard(0, 3) @ cb.HI
+            add.left = result.out
+            add.right = mult_pipe.out
+            result.in_ = (~this.clear & sguard(3)) @ add.out
+            result.in_ = this.clear @ 0
+            result.write_en = sguard(3) @ cb.HI
+    else:
+        with comp.group("mult_and_add") as mult_and_add:
+            mult_pipe.left = a.out
+            mult_pipe.right = b.out
+            mult_pipe.go = cb.HI
+            add.left = result.out
+            add.right = mult_pipe.out
+            result.in_ = (~this.clear & mult_pipe.done) @ add.out
+            result.in_ = this.clear @ 0
+            result.write_en = mult_pipe.done
+            mult_and_add.done = result.done
 
-    comp.control += [
-        cb.par(
-            store_a,
-            store_b,
-        ),
-        mult_and_add,
-    ]
+    if static:
+        comp.control += cb.static_seq(
+            cb.static_par(
+                store_a,
+                store_b,
+            ),
+            mult_and_add,
+        )
+    else:
+        comp.control += [
+            cb.par(
+                store_a,
+                store_b,
+            ),
+            mult_and_add,
+        ]
 
 
-def matmul_systolic_nxn(prog: cb.Builder, n: int = 2, bitwidth: int = 32):
+def matmul_systolic_nxn(
+    prog: cb.Builder, n: int = 2, bitwidth: int = 32, static: bool = False
+):
     """Generate a matrix multiplication unit with a basic triple-looping inner product"""
 
-    pe_comp = prog.component("pe")
-    define_pe(pe_comp)
+    pe_comp = prog.component("pe", latency=5 if static else None)
+    define_pe(pe_comp, static=static)
     comp = prog.component("main")
 
     # input: two 2x2 matrices at index 0 and 1
@@ -126,6 +165,11 @@ def matmul_systolic_nxn(prog: cb.Builder, n: int = 2, bitwidth: int = 32):
     # pes
     pe = [[comp.cell(f"pe_{i}_{j}", pe_comp) for j in range(n)] for i in range(n)]
 
+    if static:
+        group_1 = lambda x: comp.static_group(x, latency=1)
+    else:
+        group_1 = comp.group
+
     # routing within pes, and between pes and input
     with comp.continuous:
         for i in range(n):
@@ -142,44 +186,48 @@ def matmul_systolic_nxn(prog: cb.Builder, n: int = 2, bitwidth: int = 32):
     # groups for loading from memory
     load_a = []
     for i in range(n):
-        with comp.group(f"load_a{i}") as g:
+        with group_1(f"load_a{i}") as g:
             mem.addr0 = cb.const(2, 0)
             mem.addr1 = cb.const(idx_size, i)
             mem.addr2 = ia[i].out
             a[i].in_ = mem.read_data
             a[i].write_en = cb.HI
-            g.done = a[i].done
+            if not static:
+                g.done = a[i].done
         load_a.append(g)
 
     load_b = []
     for i in range(n):
-        with comp.group(f"load_b{i}") as g:
+        with group_1(f"load_b{i}") as g:
             mem.addr0 = cb.const(2, 1)
             mem.addr1 = ib[i].out
             mem.addr2 = cb.const(idx_size, i)
             b[i].in_ = mem.read_data
             b[i].write_en = cb.HI
-            g.done = b[i].done
+            if not static:
+                g.done = b[i].done
         load_b.append(g)
 
     decr_a = []
     for i in range(n):
-        with comp.group(f"decr_ia{i}") as g:
+        with group_1(f"decr_ia{i}") as g:
             subia[i].left = ia[i].out
             subia[i].right = 1
             ia[i].in_ = subia[i].out
             ia[i].write_en = cb.HI
-            g.done = ia[i].done
+            if not static:
+                g.done = ia[i].done
         decr_a.append(g)
 
     decr_b = []
     for i in range(n):
-        with comp.group(f"decr_ib{i}") as g:
+        with group_1(f"decr_ib{i}") as g:
             subib[i].left = ib[i].out
             subib[i].right = 1
             ib[i].in_ = subib[i].out
             ib[i].write_en = cb.HI
-            g.done = ib[i].done
+            if not static:
+                g.done = ib[i].done
         decr_b.append(g)
 
     # groups for storing final results to memory
@@ -187,21 +235,39 @@ def matmul_systolic_nxn(prog: cb.Builder, n: int = 2, bitwidth: int = 32):
     for i in range(n):
         row = []
         for j in range(n):
-            with comp.group(f"store_pe_{i}_{j}") as g:
+            with group_1(f"store_pe_{i}_{j}") as g:
                 mem.addr0 = cb.const(2, 2)
                 mem.addr1 = cb.const(idx_size, i)
                 mem.addr2 = cb.const(idx_size, j)
                 mem.write_data = pe[i][j].out
                 mem.write_en = cb.HI
-                g.done = mem.done
+                if not static:
+                    g.done = mem.done
             row.append(g)
         store_pe.append(row)
+
+    def reg_store(reg, val, groupname):
+        with group_1(groupname) as g:
+            reg.in_ = val
+            reg.write_en = cb.HI
+            if not static:
+                g.done = reg.done
+        return g
+
+    # HACK!!!
+    if static:
+        old_par = cb.par
+        old_invoke = cb.invoke
+        old_SeqComp = ast.SeqComp
+        cb.par = cb.static_par
+        cb.invoke = cb.static_invoke
+        ast.SeqComp = ast.StaticSeqComp
 
     control = [
         # initialization
         cb.par(
-            *[comp.reg_store(ia[i], n, f"init_ia{i}") for i in range(n)],
-            *[comp.reg_store(ib[i], n, f"init_ib{i}") for i in range(n)],
+            *[reg_store(ia[i], n, f"init_ia{i}") for i in range(n)],
+            *[reg_store(ib[i], n, f"init_ib{i}") for i in range(n)],
             *[cb.invoke(pe[i][j], in_clear=cb.HI) for i in range(n) for j in range(n)],
         )
     ]
@@ -209,8 +275,8 @@ def matmul_systolic_nxn(prog: cb.Builder, n: int = 2, bitwidth: int = 32):
     invoke_pes = cb.par(
         *[cb.invoke(pe[i][j], in_clear=cb.LO) for i in range(n) for j in range(n)]
     )
-    clear_a = [comp.reg_store(a[i], 0, f"clear_a{i}") for i in range(n)]
-    clear_b = [comp.reg_store(b[i], 0, f"clear_b{i}") for i in range(n)]
+    clear_a = [reg_store(a[i], 0, f"clear_a{i}") for i in range(n)]
+    clear_b = [reg_store(b[i], 0, f"clear_b{i}") for i in range(n)]
 
     # rounds of systolic action
     for r in range(1, n + 1):
@@ -255,14 +321,21 @@ def matmul_systolic_nxn(prog: cb.Builder, n: int = 2, bitwidth: int = 32):
 
     comp.control += control
 
+    # end HACK
+    if static:
+        cb.par = old_par  # type: ignore
+        cb.invoke = old_invoke  # type: ignore
+        ast.SeqComp = old_SeqComp  # type: ignore
+
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("size", help="size of the square matrix", default=2, type=int)
+    parser.add_argument("--static", action="store_true")
     args = parser.parse_args()
 
     prog = cb.Builder(str(Path(__file__).resolve().parent))
-    matmul_systolic_nxn(prog, args.size)
+    matmul_systolic_nxn(prog, args.size, static=args.static)
     prog.program.emit()
 
 

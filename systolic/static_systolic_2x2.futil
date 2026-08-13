@@ -1,0 +1,327 @@
+import "primitives/core.futil";
+import "primitives/binary_operators.futil";
+import "primitives/memories/comb.futil";
+
+// processing element
+static<5> component pe(ain: 32, bin: 32, clear: 1) -> (aout: 32, bout: 32, out: 32) {
+  cells {
+    mult_pipe = std_mult_pipe(32);
+    add = std_add(32);
+
+    a = std_reg(32);
+    b = std_reg(32);
+    result = std_reg(32);
+  }
+  wires {
+    out = result.out;
+    aout = a.out;
+    bout = b.out;
+
+    static<1> group store_a {
+      a.in = !clear ? ain;
+      a.in = clear ? 32'd0;
+      a.write_en = 1'b1;
+    }
+    
+    static<1> group store_b {
+      b.in = !clear ? bin;
+      b.in = clear ? 32'd0;
+      b.write_en = 1'b1;
+    }
+
+    static<4> group mult_and_add {
+      mult_pipe.left = %[0:3] ? a.out;
+      mult_pipe.right = %[0:3] ? b.out;
+      mult_pipe.go = %[0:3] ? 1'b1;
+      add.left = result.out;
+      add.right = mult_pipe.out;
+      result.in = !clear & %3 ? add.out;
+      result.in = clear ? 32'd0;
+      result.write_en = %3 ? 1'b1;
+    }
+  }
+  control {
+    static seq {
+      static par {
+        store_a;
+        store_b;
+      }
+      mult_and_add;
+    }
+  }
+}
+
+component main() -> () {
+  cells {
+    // input: two 2x2 matrices at index 0 and 1
+    // output: one 2x2 matrix at index 2
+    @external mem = comb_mem_d3(32, 3, 2, 2, 2, 2, 2);
+
+    // data registers to pass into array
+    a0 = std_reg(32);
+    a1 = std_reg(32);
+    b0 = std_reg(32);
+    b1 = std_reg(32);
+
+    // indices to remember where to load from
+    ia0 = std_reg(2);
+    ia1 = std_reg(2);
+    ib0 = std_reg(2);
+    ib1 = std_reg(2);
+    subia0 = std_sub(2);
+    subia1 = std_sub(2);
+    subib0 = std_sub(2);
+    subib1 = std_sub(2);
+
+    // processing elements
+    pe00 = pe();
+    pe01 = pe();
+    pe10 = pe();
+    pe11 = pe();
+  }
+  wires {
+    // routing between pes
+    pe00.ain = a0.out;
+    pe00.bin = b0.out;
+    pe01.ain = pe00.aout;
+    pe01.bin = b1.out;
+    pe10.ain = a1.out;
+    pe10.bin = pe00.bout;
+    pe11.ain = pe10.aout;
+    pe11.bin = pe01.bout;
+
+    static<1> group clear_a0 {
+      a0.in = 32'd0;
+      a0.write_en = 1'b1;
+    }
+
+    static<1> group clear_a1 {
+      a1.in = 32'd0;
+      a1.write_en = 1'b1;
+    }
+
+    static<1> group clear_b0 {
+      b0.in = 32'd0;
+      b0.write_en = 1'b1;
+    }
+
+    static<1> group clear_b1 {
+      b1.in = 32'd0;
+      b1.write_en = 1'b1;
+    }
+
+    static<1> group init_ia0 {
+      ia0.in = 2'd1;
+      ia0.write_en = 1'b1;
+    }
+
+    static<1> group init_ia1 {
+      ia1.in = 2'd1;
+      ia1.write_en = 1'b1;
+    }
+
+    static<1> group init_ib0 {
+      ib0.in = 2'd1;
+      ib0.write_en = 1'b1;
+    }
+
+    static<1> group init_ib1 {
+      ib1.in = 2'd1;
+      ib1.write_en = 1'b1;
+    }
+
+    static<1> group load_a0 {
+      mem.addr0 = 2'd0;
+      mem.addr1 = 2'd0;
+      mem.addr2 = ia0.out;
+      a0.in = mem.read_data;
+      a0.write_en = 1'b1;
+    }
+
+    static<1> group load_a1 {
+      mem.addr0 = 2'd0;
+      mem.addr1 = 2'd1;
+      mem.addr2 = ia1.out;
+      a1.in = mem.read_data;
+      a1.write_en = 1'b1;
+    }
+
+    static<1> group load_b0 {
+      mem.addr0 = 2'd1;
+      mem.addr1 = ib0.out;
+      mem.addr2 = 2'd0;
+      b0.in = mem.read_data;
+      b0.write_en = 1'b1;
+    }
+
+    static<1> group load_b1 {
+      mem.addr0 = 2'd1;
+      mem.addr1 = ib1.out;
+      mem.addr2 = 2'd1;
+      b1.in = mem.read_data;
+      b1.write_en = 1'b1;
+    }
+
+    static<1> group decr_ia0 {
+      subia0.left = ia0.out;
+      subia0.right = 2'd1;
+      ia0.in = subia0.out;
+      ia0.write_en = 1'b1;
+    }
+
+    static<1> group decr_ia1 {
+      subia1.left = ia1.out;
+      subia1.right = 2'd1;
+      ia1.in = subia1.out;
+      ia1.write_en = 1'b1;
+    }
+
+    static<1> group decr_ib0 {
+      subib0.left = ib0.out;
+      subib0.right = 2'd1;
+      ib0.in = subib0.out;
+      ib0.write_en = 1'b1;
+    }
+
+    static<1> group decr_ib1 {
+      subib1.left = ib1.out;
+      subib1.right = 2'd1;
+      ib1.in = subib1.out;
+      ib1.write_en = 1'b1;
+    }
+
+    static<1> group store_pe00 {
+      mem.addr0 = 2'd2;
+      mem.addr1 = 2'd0;
+      mem.addr2 = 2'd0;
+      mem.write_data = pe00.out;
+      mem.write_en = 1'b1;
+    }
+
+    static<1> group store_pe01 {
+      mem.addr0 = 2'd2;
+      mem.addr1 = 2'd0;
+      mem.addr2 = 2'd1;
+      mem.write_data = pe01.out;
+      mem.write_en = 1'b1;
+    }
+
+    static<1> group store_pe10 {
+      mem.addr0 = 2'd2;
+      mem.addr1 = 2'd1;
+      mem.addr2 = 2'd0;
+      mem.write_data = pe10.out;
+      mem.write_en = 1'b1;
+    }
+
+    static<1> group store_pe11 {
+      mem.addr0 = 2'd2;
+      mem.addr1 = 2'd1;
+      mem.addr2 = 2'd1;
+      mem.write_data = pe11.out;
+      mem.write_en = 1'b1;
+    }
+  }
+  control {
+    static seq {
+      // setup registers, latency = 5
+      static par {
+        init_ia0;
+        init_ia1;
+        init_ib0;
+        init_ib1;
+        static invoke pe00(clear=1'b1)();
+        static invoke pe01(clear=1'b1)();
+        static invoke pe10(clear=1'b1)();
+        static invoke pe11(clear=1'b1)();
+      }
+
+      // 1st round latency = 2 + 5 + 1 = 8
+      // latency = 2
+      static par {
+        static seq {
+          load_a0;
+          load_b0;
+        }
+        clear_a1;
+        clear_b1;
+      }
+      // latency = 5
+      static par {
+        static invoke pe00(clear=1'b0)();
+        static invoke pe01(clear=1'b0)();
+        static invoke pe10(clear=1'b0)();
+        static invoke pe11(clear=1'b0)();   
+      }
+      // latency = 1
+      static par {
+        decr_ia0;
+        decr_ib0;
+      }
+
+      // 2nd round, latency = 4 + 5 + 1 = 10
+      // latency = 4
+      static seq {
+        load_a0;
+        load_a1;
+        load_b0;
+        load_b1;
+      }
+      // latency = 5
+      static par {
+        static invoke pe00(clear=1'b0)();
+        static invoke pe01(clear=1'b0)();
+        static invoke pe10(clear=1'b0)();
+        static invoke pe11(clear=1'b0)();   
+      }
+      // latency = 1
+      static par {
+        decr_ia1;
+        decr_ib1;
+      }
+
+      // 3rd round, latency = 2 + 5 = 7
+      // latency = 2
+      static par {
+        static seq {
+          load_a1;
+          load_b1;
+        }
+        clear_a0;
+        clear_b0;
+      }
+      // latency = 5
+      static par {
+        static invoke pe00(clear=1'b0)();
+        static invoke pe01(clear=1'b0)();
+        static invoke pe10(clear=1'b0)();
+        static invoke pe11(clear=1'b0)();   
+      }
+
+      // 4th round, latency = 1 + 5 = 6
+      static par {
+        clear_a0;
+        clear_a1;
+        clear_b0;
+        clear_b1;
+      }
+      static par {
+        static invoke pe00(clear=1'b0)();
+        static invoke pe01(clear=1'b0)();
+        static invoke pe10(clear=1'b0)();
+        static invoke pe11(clear=1'b0)();   
+      }
+
+      // store results
+      // latency = 4
+      static seq {
+        store_pe00;
+        store_pe01;
+        store_pe10;
+        store_pe11;
+      }
+
+      // total latency = 5 + 8 + 10 + 7 + 6 + 4 = 40, which is greater than 38...?
+    }
+  }
+}
