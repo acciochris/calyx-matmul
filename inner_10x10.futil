@@ -1,0 +1,172 @@
+import "primitives/core.futil";
+import "primitives/memories/comb.futil";
+import "primitives/binary_operators.futil";
+component main<"pos"={0}>() -> () {
+  cells {
+    @external @pos{1} mem = comb_mem_d3(32, 3, 10, 10, 2, 4, 4);
+    @pos{2} reg_1 = std_reg(4);
+    @pos{3} reg_2 = std_reg(4);
+    @pos{4} reg_3 = std_reg(4);
+    @pos{5} reg_4 = std_reg(32);
+    @pos{6} reg_5 = std_reg(32);
+    @pos{7} reg_6 = std_reg(32);
+    @pos{8} mult_pipe_7 = std_mult_pipe(32);
+    @pos{9} add_8 = std_add(32);
+    @pos{15} lt_9 = std_lt(4);
+    @pos{17} lt_10 = std_lt(4);
+    @pos{20} lt_11 = std_lt(4);
+    @pos{21} reg_3_incr_1_12 = std_add(4);
+    @pos{23} reg_2_incr_1_13 = std_add(4);
+    @pos{25} reg_1_incr_1_14 = std_add(4);
+  }
+  wires {
+    group read_mat_0<"pos"={10}> {
+      mem.addr0 = 2'd0;
+      mem.addr1 = reg_1.out;
+      mem.addr2 = reg_3.out;
+      reg_4.in = mem.read_data;
+      reg_4.write_en = 1'd1;
+      read_mat_0[done] = reg_4.done;
+    }
+    group read_mat_1<"pos"={11}> {
+      mem.addr0 = 2'd1;
+      mem.addr1 = reg_3.out;
+      mem.addr2 = reg_2.out;
+      reg_5.in = mem.read_data;
+      reg_5.write_en = 1'd1;
+      read_mat_1[done] = reg_5.done;
+    }
+    group mult_and_add<"pos"={12}> {
+      mult_pipe_7.left = reg_4.out;
+      mult_pipe_7.right = reg_5.out;
+      add_8.left = mult_pipe_7.out;
+      add_8.right = reg_6.out;
+      reg_6.in = mult_pipe_7.done ? add_8.out;
+      reg_6.write_en = mult_pipe_7.done;
+      mult_pipe_7.go = 1'd1;
+      mult_and_add[done] = reg_6.done;
+    }
+    group write_result<"pos"={13}> {
+      mem.addr0 = 2'd2;
+      mem.addr1 = reg_1.out;
+      mem.addr2 = reg_2.out;
+      mem.write_data = reg_6.out;
+      mem.write_en = 1'd1;
+      write_result[done] = mem.done;
+    }
+    group reg_1_store_to_reg<"pos"={14}> {
+      reg_1.in = 4'd0;
+      reg_1.write_en = 1'd1;
+      reg_1_store_to_reg[done] = reg_1.done;
+    }
+    comb group lt_9_group<"pos"={15}> {
+      lt_9.left = reg_1.out;
+      lt_9.right = 4'd10;
+    }
+    group reg_2_store_to_reg<"pos"={16}> {
+      reg_2.in = 4'd0;
+      reg_2.write_en = 1'd1;
+      reg_2_store_to_reg[done] = reg_2.done;
+    }
+    comb group lt_10_group<"pos"={17}> {
+      lt_10.left = reg_2.out;
+      lt_10.right = 4'd10;
+    }
+    group reg_3_store_to_reg<"pos"={18}> {
+      reg_3.in = 4'd0;
+      reg_3.write_en = 1'd1;
+      reg_3_store_to_reg[done] = reg_3.done;
+    }
+    group reg_6_store_to_reg<"pos"={19}> {
+      reg_6.in = 32'd0;
+      reg_6.write_en = 1'd1;
+      reg_6_store_to_reg[done] = reg_6.done;
+    }
+    comb group lt_11_group<"pos"={20}> {
+      lt_11.left = reg_3.out;
+      lt_11.right = 4'd10;
+    }
+    group reg_3_incr_1_12_group<"pos"={21}> {
+      reg_3_incr_1_12.left = reg_3.out;
+      reg_3_incr_1_12.right = 4'd1;
+      reg_3.write_en = 1'd1;
+      reg_3.in = reg_3_incr_1_12.out;
+      reg_3_incr_1_12_group[done] = reg_3.done;
+    }
+    group reg_2_incr_1_13_group<"pos"={23}> {
+      reg_2_incr_1_13.left = reg_2.out;
+      reg_2_incr_1_13.right = 4'd1;
+      reg_2.write_en = 1'd1;
+      reg_2.in = reg_2_incr_1_13.out;
+      reg_2_incr_1_13_group[done] = reg_2.done;
+    }
+    group reg_1_incr_1_14_group<"pos"={25}> {
+      reg_1_incr_1_14.left = reg_1.out;
+      reg_1_incr_1_14.right = 4'd1;
+      reg_1.write_en = 1'd1;
+      reg_1.in = reg_1_incr_1_14.out;
+      reg_1_incr_1_14_group[done] = reg_1.done;
+    }
+  }
+  control {
+    @pos{27} seq {
+      @pos{27} reg_1_store_to_reg;
+      @pos{26} while lt_9.out with lt_9_group {
+        @pos{26} seq {
+          @pos{26} reg_2_store_to_reg;
+          @pos{24} while lt_10.out with lt_10_group {
+            @pos{24} seq {
+              @pos{24} reg_3_store_to_reg;
+              @pos{24} reg_6_store_to_reg;
+              @pos{22} while lt_11.out with lt_11_group {
+                @pos{22} seq {
+                  @pos{22} read_mat_0;
+                  @pos{22} read_mat_1;
+                  @pos{22} mult_and_add;
+                  @pos{22} reg_3_incr_1_12_group;
+                }
+              }
+              @pos{24} write_result;
+              @pos{24} reg_2_incr_1_13_group;
+            }
+          }
+          @pos{26} reg_1_incr_1_14_group;
+        }
+      }
+    }
+  }
+}
+
+sourceinfo #{
+FILES 
+  0: matmul.py
+POSITIONS 
+  0: 0 42
+  1: 0 23
+  2: 0 61
+  3: 0 62
+  4: 0 63
+  5: 0 66
+  6: 0 67
+  7: 0 68
+  8: 0 70
+  9: 0 71
+  10: 0 73
+  11: 0 81
+  12: 0 89
+  13: 0 99
+  14: 0 108
+  15: 0 110
+  16: 0 112
+  17: 0 114
+  18: 0 116
+  19: 0 117
+  20: 0 119
+  21: 0 124
+  22: 0 118
+  23: 0 128
+  24: 0 113
+  25: 0 131
+  26: 0 109
+  27: 0 107
+}#
